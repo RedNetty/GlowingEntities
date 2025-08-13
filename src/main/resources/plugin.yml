@@ -1,0 +1,24 @@
+name: GlowingEntities
+version: 1.4.6
+description: A powerful API for making entities and blocks glow with custom colors
+author: SkytAsul
+website: https://github.com/SkytAsul/GlowingEntities
+main: fr.skytasul.glowingentities.GlowingEntitiesPlugin
+
+# Supported Minecraft versions
+api-version: 1.17
+
+# Soft dependencies (optional, but will load after if present)
+softdepend: []
+
+# Load order - load early so other plugins can use the API
+load: STARTUP
+
+# Commands (none for this API plugin)
+commands: {}
+
+# Permissions (none needed for this API plugin)
+permissions: {}
+
+# Plugin metadata
+prefix: GlowingEntities

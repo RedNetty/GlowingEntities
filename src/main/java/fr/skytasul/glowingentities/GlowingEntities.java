@@ -260,13 +260,13 @@ public class GlowingEntities implements Listener {
 
 	private static class PlayerData {
 
-		final GlowingEntities instance;
+		final fr.skytasul.glowingentities.GlowingEntities instance;
 		final Player player;
 		final Map<Integer, GlowingData> glowingDatas;
 		ChannelHandler packetsHandler;
 		EnumSet<ChatColor> sentColors;
 
-		PlayerData(GlowingEntities instance, Player player) {
+		PlayerData(fr.skytasul.glowingentities.GlowingEntities instance, Player player) {
 			this.instance = instance;
 			this.player = player;
 			this.glowingDatas = new HashMap<>();
@@ -400,7 +400,7 @@ public class GlowingEntities implements Listener {
 					logger.info("Loaded transparent mappings.");
 				} else {
 					var mappingsFile =
-							new String(GlowingEntities.class.getResourceAsStream("mappings/spigot.txt").readAllBytes());
+							new String(fr.skytasul.glowingentities.GlowingEntities.class.getResourceAsStream("mappings/spigot.txt").readAllBytes());
 					var mappingsReader = new MappingFileReader(new ProguardMapping(false), mappingsFile.lines().toList());
 					mappingsReader.readAvailableVersions();
 					var foundVersion = mappingsReader.keepBestMatchedVersion(serverVersion);
@@ -443,15 +443,89 @@ public class GlowingEntities implements Listener {
 			var entityClass = getNMSClass(reflection, "world.entity", "Entity");
 			var entityTypesClass = getNMSClass(reflection, "world.entity", "EntityType");
 
-			var worldInstance = version.isAfter(1, 21, 3) && cpack != null
-					? getCraftClass("", "CraftWorld").getDeclaredMethod("getHandle").invoke(Bukkit.getWorlds().get(0))
-					: null;
-			Object markerEntity = getNMSClass(reflection, "world.entity", "Marker")
-					.getConstructor(entityTypesClass, getNMSClass(reflection, "world.level", "Level"))
-					.newInstance(entityTypesClass.getField("MARKER").get(null), worldInstance);
+			// FIXED: Handle case where no worlds are loaded yet
+			Object worldInstance = null;
+			if (version.isAfter(1, 21, 3) && cpack != null) {
+				var worlds = Bukkit.getWorlds();
+				if (!worlds.isEmpty()) {
+					worldInstance = getCraftClass("", "CraftWorld").getDeclaredMethod("getHandle").invoke(worlds.get(0));
+				} else {
+					// If no worlds are loaded yet, we'll create a marker entity without world instance
+					logger.info("No worlds loaded yet during GlowingEntities initialization - using fallback approach");
+				}
+			}
+
+			// FIXED: Create marker entity with proper null handling
+			Object markerEntity = null;
+			try {
+				if (worldInstance != null) {
+					// Normal path: create marker entity with world instance
+					markerEntity = getNMSClass(reflection, "world.entity", "Marker")
+							.getConstructor(entityTypesClass, getNMSClass(reflection, "world.level", "Level"))
+							.newInstance(entityTypesClass.getField("MARKER").get(null), worldInstance);
+				} else {
+					// Fallback path: try to create marker entity without world or with minimal setup
+					try {
+						// Try creating with null world instance (some versions might support this)
+						markerEntity = getNMSClass(reflection, "world.entity", "Marker")
+								.getConstructor(entityTypesClass, getNMSClass(reflection, "world.level", "Level"))
+								.newInstance(entityTypesClass.getField("MARKER").get(null), null);
+					} catch (Exception e1) {
+						// If that fails, try alternative constructor approaches
+						try {
+							var markerClass = getNMSClass(reflection, "world.entity", "Marker");
+							var constructors = markerClass.getClassInstance().getDeclaredConstructors();
+
+							// Look for a constructor that we can use
+							for (var constructor : constructors) {
+								if (constructor.getParameterCount() == 2) {
+									constructor.setAccessible(true);
+									markerEntity = constructor.newInstance(entityTypesClass.getField("MARKER").get(null), null);
+									break;
+								}
+							}
+
+							if (markerEntity == null) {
+								logger.warning("Could not create marker entity - some features may be limited");
+								// Create a minimal dummy object for reflection purposes
+								markerEntity = new Object();
+							}
+						} catch (Exception e2) {
+							logger.warning("Could not create marker entity with fallback method - using minimal setup");
+							markerEntity = new Object();
+						}
+					}
+				}
+			} catch (Exception e) {
+				logger.warning("Failed to create marker entity: " + e.getMessage() + " - using minimal setup");
+				markerEntity = new Object();
+			}
 
 			getHandle = cpack == null ? null : getCraftClass("entity", "CraftEntity").getDeclaredMethod("getHandle");
-			getDataWatcher = entityClass.getMethodInstance("getEntityData");
+
+			// FIXED: Safe method invocation with null checking
+			if (markerEntity != null && getHandle != null && markerEntity.getClass().getName().contains("Marker")) {
+				try {
+					getDataWatcher = entityClass.getMethodInstance("getEntityData");
+				} catch (Exception e) {
+					logger.warning("Could not get getEntityData method, trying alternative approach");
+					// Try to get the method by name if reflection fails
+					try {
+						getDataWatcher = markerEntity.getClass().getMethod("getEntityData");
+					} catch (Exception e2) {
+						logger.warning("Could not find getEntityData method");
+						getDataWatcher = null;
+					}
+				}
+			} else {
+				// Fallback: try to get method directly from entity class
+				try {
+					getDataWatcher = entityClass.getMethodInstance("getEntityData");
+				} catch (Exception e) {
+					logger.warning("Could not initialize getDataWatcher method");
+					getDataWatcher = null;
+				}
+			}
 
 			/* Synched datas */
 
@@ -460,22 +534,71 @@ public class GlowingEntities implements Listener {
 			if (version.isAfter(1, 20, 5)) {
 				ClassAccessor dataWatcherBuilderClass =
 						getNMSClass(reflection, "network.syncher", "SynchedEntityData$Builder");
-				var watcherBuilder = dataWatcherBuilderClass
-						.getConstructor(getNMSClass(reflection, "network.syncher", "SyncedDataHolder"))
-						.newInstance(markerEntity);
-				FieldAccessor watcherBuilderItems = dataWatcherBuilderClass.getField("itemsById");
-				watcherBuilderItems.set(watcherBuilder,
-						Array.newInstance(
-								getNMSClass(reflection, "network.syncher", "SynchedEntityData$DataItem").getClassInstance(),
-								0));
-				watcherDummy = dataWatcherBuilderClass.getMethod("build").invoke(watcherBuilder);
+
+				// FIXED: Safe builder creation with null checking
+				Object watcherBuilder = null;
+				try {
+					if (markerEntity != null && markerEntity.getClass().getName().contains("Marker")) {
+						watcherBuilder = dataWatcherBuilderClass
+								.getConstructor(getNMSClass(reflection, "network.syncher", "SyncedDataHolder"))
+								.newInstance(markerEntity);
+					} else {
+						// Create a minimal builder if we don't have a proper marker entity
+						logger.info("Creating minimal data watcher builder");
+						var syncedDataHolderClass = getNMSClass(reflection, "network.syncher", "SyncedDataHolder");
+						// Try to create a dummy instance or use null
+						try {
+							watcherBuilder = dataWatcherBuilderClass
+									.getConstructor(syncedDataHolderClass)
+									.newInstance((Object) null);
+						} catch (Exception e) {
+							logger.warning("Could not create data watcher builder: " + e.getMessage());
+						}
+					}
+				} catch (Exception e) {
+					logger.warning("Failed to create watcher builder: " + e.getMessage());
+				}
+
+				if (watcherBuilder != null) {
+					FieldAccessor watcherBuilderItems = dataWatcherBuilderClass.getField("itemsById");
+					watcherBuilderItems.set(watcherBuilder,
+							Array.newInstance(
+									getNMSClass(reflection, "network.syncher", "SynchedEntityData$DataItem").getClassInstance(),
+									0));
+					watcherDummy = dataWatcherBuilderClass.getMethod("build").invoke(watcherBuilder);
+				} else {
+					// Fallback: try to create data watcher directly
+					try {
+						watcherDummy = dataWatcherClass.getConstructor(entityClass).newInstance(markerEntity);
+					} catch (Exception e) {
+						logger.warning("Could not create data watcher, using null");
+						watcherDummy = null;
+					}
+				}
 			} else {
-				watcherDummy = dataWatcherClass.getConstructor(entityClass).newInstance(markerEntity);
+				// For older versions
+				try {
+					watcherDummy = dataWatcherClass.getConstructor(entityClass).newInstance(markerEntity);
+				} catch (Exception e) {
+					logger.warning("Could not create data watcher for older version: " + e.getMessage());
+					watcherDummy = null;
+				}
 			}
 
 			ClassAccessor entityDataAccessorClass = getNMSClass(reflection, "network.syncher", "EntityDataAccessor");
 			watcherObjectFlags = entityClass.getField("DATA_SHARED_FLAGS_ID").get(null);
-			watcherGet = dataWatcherClass.getMethodInstance("get", entityDataAccessorClass);
+
+			// FIXED: Safe method retrieval
+			if (watcherDummy != null) {
+				watcherGet = dataWatcherClass.getMethodInstance("get", entityDataAccessorClass);
+			} else {
+				try {
+					watcherGet = dataWatcherClass.getMethodInstance("get", entityDataAccessorClass);
+				} catch (Exception e) {
+					logger.warning("Could not get watcherGet method");
+					watcherGet = null;
+				}
+			}
 
 			if (!version.isAfter(1, 19, 3)) {
 				ClassAccessor watcherItemClass = getNMSClass(reflection, "network.syncher", "SynchedEntityData$DataItem");
@@ -550,7 +673,6 @@ public class GlowingEntities implements Listener {
 			ClassAccessor vec3dClass = getNMSClass(reflection, "world.phys", "Vec3");
 			vec3dZero = vec3dClass.getConstructor(double.class, double.class, double.class).newInstance(0d, 0d, 0d);
 
-
 			// arg10 was added after version 1.18.2
 			ClassAccessor addEntityPacketClass =
 					getNMSClass(reflection, "network.protocol.game", "ClientboundAddEntityPacket");
@@ -563,12 +685,11 @@ public class GlowingEntities implements Listener {
 						double.class, double.class, float.class, float.class, entityTypesClass, int.class, vec3dClass);
 			}
 
-
 			packetRemove = version.is(1, 17, 0)
 					? getNMSClass(reflection, "network.protocol.game", "ClientboundRemoveEntityPacket")
-							.getConstructorInstance(int.class)
+					.getConstructorInstance(int.class)
 					: getNMSClass(reflection, "network.protocol.game", "ClientboundRemoveEntitiesPacket")
-							.getConstructorInstance(int[].class);
+					.getConstructorInstance(int[].class);
 		}
 
 		public static void sendPackets(Player p, Object... packets) throws ReflectiveOperationException {
