@@ -1,6 +1,5 @@
 package fr.skytasul.glowingentities;
 
-import fr.skytasul.glowingentities.GlowingEntities.Packets;
 import io.papermc.paper.event.packet.PlayerChunkLoadEvent;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -10,6 +9,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.HandlerList;
 import org.bukkit.event.Listener;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.Plugin;
 import org.jetbrains.annotations.NotNull;
 import java.util.HashMap;
@@ -30,7 +30,7 @@ public class GlowingBlocks implements Listener {
 
 	private final @NotNull GlowingEntities entities;
 	private Map<Player, PlayerData> glowing;
-	private boolean enabled = false;
+	boolean enabled = false;
 
 	/**
 	 * Initializes the Glowing blocks API.
@@ -197,6 +197,7 @@ public class GlowingBlocks implements Listener {
 
 	@EventHandler
 	public void onPlayerChunkLoad(PlayerChunkLoadEvent event) {
+
 		PlayerData playerData = glowing.get(event.getPlayer());
 		if (playerData == null)
 			return;
@@ -251,8 +252,8 @@ public class GlowingBlocks implements Listener {
 		public void spawn() throws ReflectiveOperationException {
 			init();
 
-			Packets.createEntity(player, entityId, entityUuid, Packets.shulkerEntityType, location);
-			Packets.setMetadata(player, entityId, FLAGS, false);
+			GlowingEntities.Packets.createEntity(player, entityId, entityUuid, GlowingEntities.Packets.shulkerEntityType, location);
+			GlowingEntities.Packets.setMetadata(player, entityId, FLAGS, false);
 			// this will take care of refreshing the color thanks to the packet handler in GlowingEntities
 		}
 
@@ -260,7 +261,7 @@ public class GlowingBlocks implements Listener {
 			if (entityUuid == null)
 				return;
 
-			Packets.removeEntities(player, entityId);
+			GlowingEntities.Packets.removeEntities(player, entityId);
 			entities.unsetGlowing(entityId, player);
 		}
 
