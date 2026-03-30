@@ -20,3 +20,10 @@ Thumbs.db
 
 ### Logs ###
 *.log
+
+# Build artifacts and OS files
+target/
+*.class
+*.jar
+!*-sources.jar
+
