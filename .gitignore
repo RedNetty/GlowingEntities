@@ -5,3 +5,18 @@
 .project
 /rawMappings
 /dependency-reduced-pom.xml
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### macOS ###
+.DS_Store
+
+### Windows ###
+Thumbs.db
+
+### Logs ###
+*.log
